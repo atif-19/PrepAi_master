@@ -44,3 +44,48 @@ exports.registerUser = async (req, res) => {
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
+
+
+// @desc    Authenticate user & get token
+// @route   POST /api/auth/login
+exports.loginUser = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        // 1. Find user by email
+        const user = await User.findOne({ email });
+
+        // 2. Check if user exists and password matches
+        // We use bcrypt.compare to check the plain text password against the hash
+        if (user && (await bcrypt.compare(password, user.passwordHash))) {
+            const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+                expiresIn: '7d'
+            });
+
+            res.json({
+                token,
+                user: {
+                    id: user._id,
+                    name: user.name,
+                    email: user.email
+                }
+            });
+        } else {
+            res.status(401).json({ message: 'Invalid email or password' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// @desc    Get user profile
+// @route   GET /api/auth/me
+exports.getMe = async (req, res) => {
+    try {
+        // req.user will be set by our middleware 
+        const user = await User.findById(req.user.id).select('-passwordHash');
+        res.json(user);
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
