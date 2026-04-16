@@ -57,12 +57,25 @@ exports.answerSession = async (req, res) => {
         const session = await Session.findById(sessionId);
         if (!session) return res.status(404).json({ message: "Session not found" });
 
-        // 2. Prepare Chat History for Gemini
-        // We map our questionsAsked array into the format Gemini expects
-        const chatHistory = session.questionsAsked.map(q => ([
-            { role: "model", parts: [{ text: q.questionText }] },
-            { role: "user", parts: [{ text: q.userAnswer }] }
-        ])).flat();
+        // 2. RECONSTRUCT HISTORY (Strict User-Model-User order)
+        // Start with the initial prompt required by Gemini
+        let chatHistory = [
+            { role: "user", parts: [{ text: "I am ready to start the technical interview." }] },
+            { role: "model", parts: [{ text: "Understood. I will now begin the interview." }] }
+        ];
+
+        // Add previous turns from the database
+        session.questionsAsked.forEach(q => {
+            chatHistory.push({ role: "user", parts: [{ text: "What is your next question?" }] }); // Placeholder to keep sequence
+            chatHistory.push({ role: "model", parts: [{ text: q.questionText }] });
+            chatHistory.push({ role: "user", parts: [{ text: q.userAnswer }] });
+        });
+
+        // The current question the AI asked is actually the start of a new 'model' turn
+        chatHistory.push({ role: "model", parts: [{ text: questionText }] });
+
+        // The 'userAnswer' from req.body will be sent as the final 'user' message 
+        // in the generateAIResponse call, so we don't add it to history here.
 
         // 3. Check if it's time to end (e.g., after 8 questions)
         const questionCount = session.questionsAsked.length;

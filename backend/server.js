@@ -24,6 +24,8 @@ app.use('/api/user', userRoutes);
 const sessionRoutes = require('./src/routes/sessionRoutes');
 app.use('/api/session', sessionRoutes);
 
+const progressRoutes = require('./src/routes/progressRoutes');
+app.use('/api/progress', progressRoutes);
 // Basic Test Route
 app.get('/', (req, res) => {
     res.send('PrepAI API is running...');

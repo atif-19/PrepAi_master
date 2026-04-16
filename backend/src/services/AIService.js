@@ -60,59 +60,63 @@ exports.answerSession = async (req, res) => {
         const { sessionId, questionText, userAnswer } = req.body;
         const user = req.user;
 
-        // 1. Fetch the session
         const session = await Session.findById(sessionId);
         if (!session) return res.status(404).json({ message: "Session not found" });
 
-        // 2. Prepare Chat History for Gemini
-        // We map our questionsAsked array into the format Gemini expects
-        const chatHistory = session.questionsAsked.map(q => ([
-            { role: "model", parts: [{ text: q.questionText }] },
-            { role: "user", parts: [{ text: q.userAnswer }] }
-        ])).flat();
+        // FIX: Gemini history MUST start with a 'user' message.
+        // We add a dummy "Let's start" message to satisfy the API.
+        const chatHistory = [
+            { role: "user", parts: [{ text: "I am ready for the interview." }] },
+            ...session.questionsAsked.map(q => ([
+                { role: "model", parts: [{ text: q.questionText }] },
+                { role: "user", parts: [{ text: q.userAnswer }] }
+            ])).flat()
+        ];
 
-        // 3. Check if it's time to end (e.g., after 8 questions)
         const questionCount = session.questionsAsked.length;
         const isLastQuestion = questionCount >= 8;
 
-        let aiPrompt = userAnswer;
+        let aiPrompt = `CURRENT QUESTION: ${questionText}\nUSER ANSWER: ${userAnswer}`;
+        
         if (isLastQuestion) {
-            aiPrompt = `USER ANSWER: ${userAnswer}. \n\n That was the last question. Now, provide the final evaluation in the exact JSON format requested in the system instructions.`;
+            aiPrompt += `\n\nThis was the 8th question. Provide final evaluation in the requested JSON format.`;
+        } else {
+            aiPrompt += `\n\nEvaluate briefly and ask the next technical question.`;
         }
 
-        // 4. Get AI Response
         const aiResponse = await AIService.generateAIResponse(
             user,
             session.topic,
-            [], // Log handled in startSession; we use history for context here
+            [], 
             {}, 
             chatHistory,
             aiPrompt
         );
 
-        // 5. Update Session Document
+        // Save the Q&A pair we just finished
         session.questionsAsked.push({
             questionText: questionText,
             userAnswer: userAnswer,
             timestamp: new Date()
         });
 
-        // 6. Handle JSON Evaluation vs Next Question
-        if (isLastQuestion) {
-            // Attempt to parse the AI's JSON string
+        if (isLastQuestion || aiResponse.includes('"type": "evaluation"')) {
             try {
-                const evaluation = JSON.parse(aiResponse);
+                // Clean the response in case Gemini adds markdown ```json blocks
+                const cleanJson = aiResponse.replace(/```json|```/g, "").trim();
+                const evaluation = JSON.parse(cleanJson);
+                
                 session.overallScore = evaluation.overall;
                 session.status = 'completed';
                 await session.save();
                 return res.json({ type: 'evaluation', data: evaluation });
             } catch (e) {
-                // Fallback if AI output isn't clean JSON
+                // If parsing fails, just send as text for now
                 return res.json({ type: 'text', content: aiResponse });
             }
         }
 
-        // 7. If not finished, log the NEW question for future "no-repeat" memory
+        // Save to QuestionsLog to prevent repetition in FUTURE sessions [cite: 61, 141]
         await QuestionsLog.create({
             userId: user._id,
             topic: session.topic,
@@ -123,6 +127,7 @@ exports.answerSession = async (req, res) => {
         res.json({ type: 'question', content: aiResponse });
 
     } catch (error) {
+        console.error(error);
         res.status(500).json({ message: 'Error processing answer', error: error.message });
     }
 };
