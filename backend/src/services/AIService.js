@@ -3,8 +3,14 @@ const { decrypt } = require('./EncryptionService');
 
 // This function builds the complex "System Prompt" from your document [cite: 65, 67]
 const buildSystemPrompt = (user, topic, questionsLog, topicProgress) => {
+    const companies = Array.isArray(user.targetCompanies)
+  ? user.targetCompanies.join(' or ')
+  : 'top Indian service-based companies';
+  if (!user.geminiApiKeyEncrypted) {
+  throw new Error("API key not found");
+}
     return `
-You are a technical interviewer at a top Indian service-based company like ${user.targetCompanies.join(' or ')}. [cite: 68, 72]
+You are a technical interviewer at a top Indian service-based company like ${companies}.
 You are conducting a placement interview for ${user.name}. [cite: 71]
 
 CANDIDATE PROFILE:
@@ -13,7 +19,9 @@ CANDIDATE PROFILE:
 - Resume Context: ${user.resumeText?.slice(0, 500) || 'Not provided'} [cite: 75]
 
 QUESTIONS ALREADY ASKED (NEVER repeat these):
-${questionsLog.map(q => '- ' + q.questionText).join('\n')} [cite: 76, 77]
+${(questionsLog || [])
+  .map(q => typeof q === 'string' ? '- ' + q : '- ' + q.questionText)
+  .join('\n')} [cite: 76, 77]
 
 INTERVIEW RULES:
 1. Start with ONE easy confidence-building question. [cite: 79]
@@ -29,7 +37,7 @@ exports.generateAIResponse = async (user, topic, questionsLog, topicProgress, ch
     // 1. Decrypt the user's API key [cite: 52, 199]
     const apiKey = decrypt(user.geminiApiKeyEncrypted);
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
     // 2. Build the system instruction [cite: 60]
     const systemPrompt = buildSystemPrompt(user, topic, questionsLog, topicProgress);
