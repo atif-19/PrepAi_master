@@ -17,6 +17,10 @@ app.use(express.json()); // Allows the server to accept JSON data in the request
 
 const authRoutes = require('./src/routes/authRoutes');
 app.use('/api/auth', authRoutes);
+
+const userRoutes = require('./src/routes/userRoutes');
+app.use('/api/user', userRoutes);
+
 // Basic Test Route
 app.get('/', (req, res) => {
     res.send('PrepAI API is running...');
