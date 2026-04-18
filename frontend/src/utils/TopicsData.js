@@ -1,4 +1,4 @@
-export const subjects = {
+export const TopicsData = {
   DSA: [
     'Arrays & Strings', 'Linked Lists', 'Stacks & Queues',
     'Binary Search', 'Recursion & Backtracking', 'Trees (Binary Tree)',

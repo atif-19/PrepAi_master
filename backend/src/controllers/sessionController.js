@@ -1,7 +1,7 @@
 const Session = require('../models/Session');
 const QuestionsLog = require('../models/QuestionsLog');
 const AIService = require('../services/AIService');
-
+const TopicsProgress = require('../models/TopicsProgress');
 exports.startSession = async (req, res) => {
     try {
         const { topic, subject } = req.body;
@@ -21,9 +21,9 @@ exports.startSession = async (req, res) => {
         // 3. Call AI for the first question 
         // Note: For the first question, chatHistory and userMessage are empty
         const aiResponse = await AIService.generateAIResponse(
-            user, 
-            topic, 
-            history, 
+            user,
+            topic,
+            history,
             {}, // topicProgress (we'll add this later)
             [], // chatHistory
             "Hello, let's start the interview."
@@ -91,7 +91,7 @@ exports.answerSession = async (req, res) => {
             user,
             session.topic,
             [], // Log handled in startSession; we use history for context here
-            {}, 
+            {},
             chatHistory,
             aiPrompt
         );
@@ -104,19 +104,57 @@ exports.answerSession = async (req, res) => {
         });
 
         // 6. Handle JSON Evaluation vs Next Question
-        if (isLastQuestion) {
-            // Attempt to parse the AI's JSON string
-            try {
-                const evaluation = JSON.parse(aiResponse);
-                session.overallScore = evaluation.overall;
-                session.status = 'completed';
-                await session.save();
-                return res.json({ type: 'evaluation', data: evaluation });
-            } catch (e) {
-                // Fallback if AI output isn't clean JSON
-                return res.json({ type: 'text', content: aiResponse });
-            }
+        // In answerSession, the isLastQuestion block — replace entirely:
+if (isLastQuestion) {
+  try {
+    // Extract the JSON object from wherever it appears in the response
+    // Handles: plain JSON, ```json blocks, text before/after
+    const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("No JSON object found in AI response");
+
+    const evaluation = JSON.parse(jsonMatch[0]);
+
+    session.questionsAsked.push({
+      questionText: questionText,
+      userAnswer: userAnswer,
+      timestamp: new Date()
+    });
+    session.overallScore = evaluation.overall;
+    session.improvementAreas = evaluation.improve || [];
+    session.status = 'completed';
+    await session.save();
+
+    // Update TopicsProgress
+    await TopicsProgress.findOneAndUpdate(
+      { userId: user._id, topic: session.topic },
+      {
+        $inc: { totalSessionsCompleted: 1 },
+        $set: {
+          lastPracticed: new Date(),
+          averageScore: evaluation.overall,
+        },
+        $push: {
+          scoreHistory: {
+            $each: [{ date: new Date(), score: evaluation.overall }],
+            $slice: -10
+          }
         }
+      },
+      { upsert: true }
+    );
+
+    return res.json({ type: 'evaluation', data: evaluation });
+
+  } catch (e) {
+    console.error("Evaluation parse failed:", e.message);
+    console.error("Raw AI response:", aiResponse); // so you can see exactly what Gemini sent
+    return res.status(500).json({ 
+      message: 'AI returned malformed evaluation', 
+      raw: aiResponse 
+    });
+    // We return 500 instead of type:text so frontend shows error, not raw JSON dump
+  }
+}
 
         // 7. If not finished, log the NEW question for future "no-repeat" memory
         await QuestionsLog.create({
